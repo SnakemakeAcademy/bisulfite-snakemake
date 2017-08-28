@@ -1,7 +1,7 @@
 #hard-coded location of things - TO EDIT AS NEEDED
 SAMPLES = glob_wildcards("raw/{S}.fastq.gz").S
 REFERENCE = "/home/steve/genomes_temp/Bd21Control"
-
+CONTEXT = ['CpG','CHG','CHH']
 #software requirements
 #fastqc
 #trim_galore (cutadapt)
@@ -14,168 +14,112 @@ REFERENCE = "/home/steve/genomes_temp/Bd21Control"
 shell.executable("/bin/bash")
 shell.prefix("set -euo pipefail; ")
 
-ruleorder: fastqc > trim > alignment > methylation_extractor > bismark2bed > moveit
+ruleorder: fastqc > trim > alignment > methylation_extractor > bismark2bed
 
 rule final:
     input:
-        expand("cleaned/{sample}.fastq.gz", sample=SAMPLES),
+        expand("cleaned/{sample}_trimmed.fq.gz", sample=SAMPLES),
         expand("qc/{sample}_fastqc.html", sample=SAMPLES),
-        expand("out/{sample}/{sample}.sorted.bam",sample=SAMPLES),
-        expand("out/{sample}/{sample}.sorted.bam.bai",sample=SAMPLES),
-        expand("out/{sample}/{sample}_bismark.nucleotide_stats.txt", sample=SAMPLES),
-        expand("out/{sample}/{sample}_bismark.deduplication_report.txt", sample=SAMPLES),
-        expand("out/{sample}/{sample}_bismark_SE_report.txt", sample=SAMPLES),
-        expand("out/{sample}/{sample}_bismark.deduplicated.M-bias.txt", sample=SAMPLES),
-        expand("out/{sample}/{sample}_bismark.deduplicated_splitting_report.txt", sample=SAMPLES),
-        expand("out/{sample}/CpG_context_{sample}_bismark.deduplicated.txt.gz", sample=SAMPLES),
-        expand("out/{sample}/CHG_context_{sample}_bismark.deduplicated.txt.gz", sample=SAMPLES),
-        expand("out/{sample}/CHH_context_{sample}_bismark.deduplicated.txt.gz", sample=SAMPLES),
-        expand("out/{sample}/{sample}_CpG.gz.bismark.cov.gz", sample=SAMPLES),
-        expand("out/{sample}/{sample}_CHG.gz.bismark.cov.gz", sample=SAMPLES),
-        expand("out/{sample}/{sample}_CHH.gz.bismark.cov.gz", sample=SAMPLES),
-        expand("out/{sample}/{sample}_bismark.bam", sample=SAMPLES),
-        expand("out/{sample}/{sample}_bismark.deduplicated.bam", sample=SAMPLES),
+        expand("qc/{sample}_fastqc.zip", sample=SAMPLES),
+
+        expand("out/{sample}/{sample}_trimmed_bismark.bam", sample=SAMPLES),
+        expand("out/{sample}/{sample}_trimmed_bismark.deduplicated.bam", sample=SAMPLES),
+        expand("out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted.bam.bai",sample=SAMPLES),
+        expand("out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted.bam",sample=SAMPLES),
+
+        expand("out/{sample}/{sample}_trimmed_bismark.nucleotide_stats.txt", sample=SAMPLES),
+        expand("out/{sample}/{sample}_trimmed_bismark.deduplication_report.txt", sample=SAMPLES),
+        expand("out/{sample}/{sample}_trimmed_bismark_SE_report.txt", sample=SAMPLES),
+        expand("out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted.M-bias.txt", sample=SAMPLES),
+        expand("out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted_splitting_report.txt", sample=SAMPLES),
+
+        expand("out/{sample}/{context}_context_{sample}_trimmed_bismark.deduplicated.sorted.txt.gz", sample=SAMPLES, context=CONTEXT),
+
+        expand("out/{sample}/{sample}_{context}.gz.bismark.cov.gz", sample=SAMPLES,context=CONTEXT),
+        expand("out/{sample}/{sample}_{context}.gz", sample=SAMPLES,context=CONTEXT),
 
 rule fastqc:
     input:
         r1="raw/{sample}.fastq.gz",
     output:
         q1="qc/{sample}_fastqc.html",
+        zip="qc/{sample}_fastqc.zip",
     shell:
         """
-        fastqc {input.r1}
-        cd raw
-        rm {wildcards.sample}_fastqc.zip
-        mv {wildcards.sample}_fastqc.html ../{output.q1}
-        cd ../
+        fastqc {input.r1} --outdir qc
         """
 
 rule trim:
     input:
         r1="raw/{sample}.fastq.gz",
     output:
-        r1="cleaned/{sample}.fastq.gz",
-        l1="logs/{sample}.fastq.gz_trimming_report.txt",
+        r1="cleaned/{sample}_trimmed.fq.gz",
+        l1="cleaned/{sample}.fastq.gz_trimming_report.txt",
     shell:
         """
-        trim_galore {input.r1}
-        mv {wildcards.sample}_trimmed.fq.gz {output.r1}
-        mv {wildcards.sample}.fastq.gz_trimming_report.txt {output.l1}
+        trim_galore {input.r1} --output_dir cleaned
         """
 
 rule alignment:
     input:
-        r1="cleaned/{sample}.fastq.gz",
+        r1="cleaned/{sample}_trimmed.fq.gz",
     output:
-        initial="{sample}_bismark.bam",
-        dbam="{sample}_bismark.deduplicated.bam",
-        bam="{sample}.sorted.bam",
-        bai="{sample}.sorted.bam.bai",
-        se="{sample}_bismark_SE_report.txt",
-        nuc="{sample}_bismark.nucleotide_stats.txt",
-        dup="{sample}_bismark.deduplication_report.txt",
+        initial="out/{sample}/{sample}_trimmed_bismark.bam",
+        se="out/{sample}/{sample}_trimmed_bismark_SE_report.txt",
+        nuc="out/{sample}/{sample}_trimmed_bismark.nucleotide_stats.txt",
     params:
         ref=REFERENCE,
     shell:
         """
-        bismark --bowtie1 --multicore 2 -n 1 -l 28 --gzip --nucleotide_coverage {params.ref} {input.r1}
-        deduplicate_bismark --bam {wildcards.sample}_bismark.bam
-        samtools sort {wildcards.sample}_bismark.deduplicated.bam > {output.bam}
-        samtools index {output.bam}
+        bismark --bowtie1 --multicore 2 -n 1 -l 28 --gzip --nucleotide_coverage {params.ref} {input.r1} --output_dir out/{wildcards.sample}
+        """
+
+rule deduplicate:
+    input:
+        bam="out/{sample}/{sample}_trimmed_bismark.bam",
+    output:
+        bam="out/{sample}/{sample}_trimmed_bismark.deduplicated.bam",
+        dup="out/{sample}/{sample}_trimmed_bismark.deduplication_report.txt",
+    shell:
+        """
+        deduplicate_bismark --bam {input.bam}
+        """
+
+rule sort:
+    input:
+        bam="out/{sample}/{sample}_trimmed_bismark.deduplicated.bam",
+    output:
+        sort="out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted.bam",
+        bai="out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted.bam.bai",
+    shell:
+        """
+        samtools sort {input.bam} > {output.sort}
+        samtools index {output.sort}
         """
 
 rule methylation_extractor:
     input:
-        bamy="{sample}_bismark.deduplicated.bam",
+        bam="out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted.bam",
     output:
-        cg="CpG_context_{sample}_bismark.deduplicated.txt.gz",
-        chg="CHG_context_{sample}_bismark.deduplicated.txt.gz",
-        chh="CHH_context_{sample}_bismark.deduplicated.txt.gz",
-        split="{sample}_bismark.deduplicated_splitting_report.txt",
-        mbias="{sample}_bismark.deduplicated.M-bias.txt",
+        split="out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted_splitting_report.txt",
+        mbias="out/{sample}/{sample}_trimmed_bismark.deduplicated.sorted.M-bias.txt",
+        cg="out/{sample}/CpG_context_{sample}_trimmed_bismark.deduplicated.sorted.txt.gz",
+        chg="out/{sample}/CHG_context_{sample}_trimmed_bismark.deduplicated.sorted.txt.gz",
+        chh="out/{sample}/CHH_context_{sample}_trimmed_bismark.deduplicated.sorted.txt.gz",
     params:
         ref=REFERENCE,
     shell:
         """
-        bismark_methylation_extractor --gzip --multicore 4 --comprehensive --report --genome_folder {params.ref} --buffer_size 8G -s {input.bamy}
+        bismark_methylation_extractor --gzip --multicore 4 --comprehensive --report --genome_folder {params.ref} --buffer_size 8G -s {input.bam} --output out/{wildcards.sample}
         """
 
 rule bismark2bed:
     input:
-        cg="CpG_context_{sample}_bismark.deduplicated.txt.gz",
-        chg="CHG_context_{sample}_bismark.deduplicated.txt.gz",
-        chh="CHH_context_{sample}_bismark.deduplicated.txt.gz",
+        extract="out/{sample}/{context}_context_{sample}_trimmed_bismark.deduplicated.sorted.txt.gz",
     output:
-        cgbed="{sample}_CpG.gz",
-        chgbed="{sample}_CHG.gz",
-        chhbed="{sample}_CHH.gz",
-        cgcov="{sample}_CpG.gz.bismark.cov.gz",
-        chgcov="{sample}_CHG.gz.bismark.cov.gz",
-        chhcov="{sample}_CHH.gz.bismark.cov.gz",
+        bed="out/{sample}/{sample}_{context}.gz",
+        cgcov="out/{sample}/{sample}_{context}.gz.bismark.cov.gz",
     shell:
         """
-        bismark2bedGraph --CX {input.cg} -o {wildcards.sample}_CpG
-        bismark2bedGraph --CX {input.chg} -o {wildcards.sample}_CHG
-        bismark2bedGraph --CX {input.chh} -o {wildcards.sample}_CHH
-        """
-
-rule moveit:
-    input:
-        bam="{sample}.sorted.bam",
-        bai="{sample}.sorted.bam.bai",
-        nuc="{sample}_bismark.nucleotide_stats.txt",
-        dedup="{sample}_bismark.deduplication_report.txt",
-        se="{sample}_bismark_SE_report.txt",
-        mbias="{sample}_bismark.deduplicated.M-bias.txt",
-        split="{sample}_bismark.deduplicated_splitting_report.txt",
-        cg="CpG_context_{sample}_bismark.deduplicated.txt.gz",
-        chg="CHG_context_{sample}_bismark.deduplicated.txt.gz",
-        chh="CHH_context_{sample}_bismark.deduplicated.txt.gz",
-        cgcov="{sample}_CpG.gz.bismark.cov.gz",
-        chgcov="{sample}_CHG.gz.bismark.cov.gz",
-        chhcov="{sample}_CHH.gz.bismark.cov.gz",
-        cgbed="{sample}_CpG.gz",
-        chgbed="{sample}_CHG.gz",
-        chhbed="{sample}_CHH.gz",
-        fbam="{sample}_bismark.bam",
-        fdup="{sample}_bismark.deduplicated.bam",
-    output:
-        bam="out/{sample}/{sample}.sorted.bam",
-        bai="out/{sample}/{sample}.sorted.bam.bai",
-        nuc="out/{sample}/{sample}_bismark.nucleotide_stats.txt",
-        dedup="out/{sample}/{sample}_bismark.deduplication_report.txt",
-        se="out/{sample}/{sample}_bismark_SE_report.txt",
-        mbias="out/{sample}/{sample}_bismark.deduplicated.M-bias.txt",
-        split="out/{sample}/{sample}_bismark.deduplicated_splitting_report.txt",
-        cg="out/{sample}/CpG_context_{sample}_bismark.deduplicated.txt.gz",
-        chg="out/{sample}/CHG_context_{sample}_bismark.deduplicated.txt.gz",
-        chh="out/{sample}/CHH_context_{sample}_bismark.deduplicated.txt.gz",
-        cgcov="out/{sample}/{sample}_CpG.gz.bismark.cov.gz",
-        chgcov="out/{sample}/{sample}_CHG.gz.bismark.cov.gz",
-        chhcov="out/{sample}/{sample}_CHH.gz.bismark.cov.gz",
-        cgbed="out/{sample}/{sample}_CpG.gz",
-        chgbed="out/{sample}/{sample}_CHG.gz",
-        chhbed="out/{sample}/{sample}_CHH.gz",
-        fbam="out/{sample}/{sample}_bismark.bam",
-        fdup="out/{sample}/{sample}_bismark.deduplicated.bam",
-    shell:
-        """
-        mv {input.bam} {output.bam}
-        mv {input.bai} {output.bai}
-        mv {input.nuc} {output.nuc}
-        mv {input.dedup} {output.dedup}
-        mv {input.se} {output.se}
-        mv {input.mbias} {output.mbias}
-        mv {input.split} {output.split}
-        mv {input.cg} {output.cg}
-        mv {input.chg} {output.chg}
-        mv {input.chh} {output.chh}
-        mv {input.cgcov} {output.cgcov}
-        mv {input.chgcov} {output.chgcov}
-        mv {input.chhcov} {output.chhcov}
-        mv {input.cgbed} {output.cgbed}
-        mv {input.chgbed} {output.chgbed}
-        mv {input.chhbed} {output.chhbed}
-        mv {input.fbam} {output.fbam}
-        mv {input.fdup} {output.fdup}
+        bismark2bedGraph --CX {input.extract} -o {wildcards.sample}_{wildcards.context} --dir out/{wildcards.sample}
         """
